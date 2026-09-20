@@ -1,0 +1,146 @@
+@import "tailwindcss";
+
+@theme {
+  /* Surfaces and ink — warm white, the way Claude's own surfaces read. */
+  --color-paper: #fdfcfa;
+  --color-card: #ffffff;
+  --color-sunk: #f7f4ef;
+  --color-ink: #1a1815;
+  --color-ink-2: #57514a;
+  --color-ink-3: #8c857a;
+  --color-line: #eae4da;
+  --color-line-2: #dcd4c7;
+
+  /* Brand accent */
+  --color-clay: #d97757;
+  --color-clay-deep: #bd5730;
+  --color-clay-ink: #8f4222;
+  --color-clay-wash: #fbf1ec;
+  --color-clay-line: #f0d8cc;
+
+  /* Categorical series — validated all-pairs on a white surface
+     (worst CVD ΔE 9.2, worst normal-vision ΔE 24.0). */
+  --color-series-1: #eb6834;
+  --color-series-2: #2a78d6;
+  --color-series-3: #1baf7a;
+
+  /* Ordinal orange ramp — monotone L, light end clears 2:1 on white. */
+  --color-ramp-1: #e79a7e;
+  --color-ramp-2: #dd7a50;
+  --color-ramp-3: #c55628;
+  --color-ramp-4: #96401e;
+
+  /* Status — reserved, never used for a series. */
+  --color-good: #0ca30c;
+  --color-warning: #fab219;
+  --color-serious: #ec835a;
+  --color-critical: #d03b3b;
+
+  --color-grid: #ece7de;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-instrument-serif), Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11";
+  }
+
+  ::selection {
+    background: #f6ded2;
+    color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-clay-deep);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.015em;
+  }
+
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .card {
+    background: var(--color-card);
+    border: 1px solid var(--color-line);
+    border-radius: 14px;
+  }
+
+  .grain {
+    background-image: radial-gradient(circle at 1px 1px, rgba(140, 133, 122, 0.16) 1px, transparent 0);
+    background-size: 22px 22px;
+  }
+
+  .rise {
+    animation: rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .fade {
+    animation: fade 0.3s ease both;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sweep {
+  from {
+    background-position: 0% 50%;
+  }
+  to {
+    background-position: 200% 50%;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, var(--color-sunk) 25%, #efe9e1 50%, var(--color-sunk) 75%);
+  background-size: 200% 100%;
+  animation: sweep 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
