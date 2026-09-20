@@ -54,7 +54,11 @@ echo "GITHUB_TOKEN=ghp_yourtoken" > .env.local
 
 A classic read-only token with **no scopes ticked** is enough for public repositories.
 
-> Note: a server-side `GITHUB_TOKEN` is used for *every* visitor to that deployment. On a public deployment, leave it unset and let people bring their own.
+> A server-side `GITHUB_TOKEN` is used for *every* visitor to that deployment, spending one shared 5,000/hour limit. If you set one, make it a **fresh classic token with no scopes ticked** — never reuse a token that can write to your repositories — and consider lowering `ANALYSES_PER_10_MIN` (default 25 per IP).
+
+## Deploying
+
+Import the repository at [vercel.com/new](https://vercel.com/new); it is a stock Next.js app and needs no build configuration. Add `GITHUB_TOKEN` under Settings → Environment Variables if you want the deployment to answer fully without visitors supplying their own token.
 
 ## API
 

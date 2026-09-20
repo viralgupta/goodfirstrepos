@@ -6,9 +6,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/** Crude per-IP throttle so a public deployment is not a free GitHub proxy. */
+/**
+ * Crude per-IP throttle so a public deployment is not a free GitHub proxy.
+ * It matters most when GITHUB_TOKEN is set server-side, because then every
+ * visitor is spending one shared rate limit. Tune with ANALYSES_PER_10_MIN.
+ */
 const WINDOW_MS = 10 * 60 * 1000;
-const MAX_PER_WINDOW = 25;
+const MAX_PER_WINDOW = Number(process.env.ANALYSES_PER_10_MIN ?? 25) || 25;
 const hits = new Map<string, number[]>();
 
 function throttled(ip: string): boolean {
