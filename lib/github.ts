@@ -211,6 +211,7 @@ query Pulls($owner: String!, $name: String!, $cursor: String, $states: [PullRequ
         title
         url
         createdAt
+        updatedAt
         closedAt
         mergedAt
         isDraft
@@ -219,8 +220,8 @@ query Pulls($owner: String!, $name: String!, $cursor: String, $states: [PullRequ
         deletions
         author { login __typename avatarUrl }
         mergedBy { login }
-        comments(first: 6) { nodes { createdAt author { login } } }
-        reviews(first: 4) { nodes { createdAt author { login } } }
+        comments(first: 5) { nodes { createdAt author { login __typename } } }
+        reviews(first: 3) { nodes { createdAt author { login __typename } } }
       }
     }
   }
@@ -231,6 +232,7 @@ interface GqlPullNode {
   title: string;
   url: string;
   createdAt: string;
+  updatedAt: string;
   closedAt: string | null;
   mergedAt: string | null;
   isDraft: boolean;
@@ -239,8 +241,13 @@ interface GqlPullNode {
   deletions: number;
   author: { login: string; __typename: string; avatarUrl: string } | null;
   mergedBy: { login: string } | null;
-  comments: { nodes: { createdAt: string; author: { login: string } | null }[] };
-  reviews: { nodes: { createdAt: string; author: { login: string } | null }[] };
+  comments: { nodes: { createdAt: string; author: GqlActor | null }[] };
+  reviews: { nodes: { createdAt: string; author: GqlActor | null }[] };
+}
+
+interface GqlActor {
+  login: string;
+  __typename: string;
 }
 
 interface GqlCount {
@@ -288,10 +295,16 @@ interface GqlPullConnection {
   nodes: GqlPullNode[];
 }
 
+/**
+ * The first reply from an actual person. Greeting bots and CLA checks comment
+ * within seconds of every pull request, and counting those would report a
+ * median response time of zero for a project nobody is reading.
+ */
 function firstResponse(node: GqlPullNode): string | null {
   const author = node.author?.login;
   const times = [...node.comments.nodes, ...node.reviews.nodes]
     .filter((n) => n.author?.login && n.author.login !== author)
+    .filter((n) => !isBotLogin(n.author!.login, n.author!.__typename))
     .map((n) => n.createdAt)
     .sort();
   return times[0] ?? null;
@@ -307,6 +320,7 @@ function normaliseGql(node: GqlPullNode): PullRecord {
     isBot: isBotLogin(node.author?.login, node.author?.__typename),
     association: node.authorAssociation,
     createdAt: node.createdAt,
+    updatedAt: node.updatedAt,
     closedAt: node.closedAt,
     mergedAt: node.mergedAt,
     isDraft: node.isDraft,
@@ -346,6 +360,7 @@ interface RestPull {
   title: string;
   html_url: string;
   created_at: string;
+  updated_at: string;
   closed_at: string | null;
   merged_at: string | null;
   draft: boolean;
@@ -363,6 +378,7 @@ function normaliseRest(pr: RestPull): PullRecord {
     isBot: isBotLogin(pr.user?.login, pr.user?.type === "Bot" ? "Bot" : undefined),
     association: pr.author_association,
     createdAt: pr.created_at,
+    updatedAt: pr.updated_at,
     closedAt: pr.closed_at,
     mergedAt: pr.merged_at,
     isDraft: Boolean(pr.draft),
@@ -403,8 +419,8 @@ export interface CollectResult {
 type Note = (stage: string, message: string, fetched?: number, total?: number | null) => void;
 
 const CAPS = {
-  shallow: { open: 1000, closed: 400 },
-  deep: { open: 3000, closed: 1000 },
+  shallow: { open: 700, closed: 400 },
+  deep: { open: 2000, closed: 900 },
   rest: { open: 300, closed: 200 },
 };
 
@@ -455,62 +471,70 @@ async function collectViaGraphQL(
   };
 
   const caps = deep ? CAPS.deep : CAPS.shallow;
-  const pulls: PullRecord[] = [];
 
-  // Open PRs oldest-first: if we hit the cap, the ones we skip are the newest,
-  // which keeps every "older than 30/90 days" count exact.
-  let cursor: string | null = null;
   let openFetched = 0;
+  let closedFetched = 0;
   let openTotal: number | null = null;
-  let openTruncated = false;
-  for (;;) {
-    if (signal?.aborted) throw new GitHubError("Cancelled.", "aborted", 499);
-    const page: GqlPullsResponse = await graphql<GqlPullsResponse>(token, PULLS_QUERY, {
-      owner,
-      name: repo,
-      cursor,
-      states: ["OPEN"],
-      order: { field: "CREATED_AT", direction: "ASC" },
-    });
-    const conn: GqlPullConnection = page.repository.pullRequests;
-    openTotal = conn.totalCount;
-    for (const node of conn.nodes) pulls.push(normaliseGql(node));
-    openFetched += conn.nodes.length;
-    note("open", "Reading open pull requests", openFetched, openTotal);
-    if (!conn.pageInfo.hasNextPage) break;
-    if (openFetched >= caps.open) {
-      openTruncated = true;
-      break;
+  let closedTotal: number | null = null;
+
+  // One progress line for both walks, so a reader sees a bar that only ever
+  // moves forwards rather than two chains talking over each other.
+  const report = () => {
+    const target =
+      openTotal !== null && closedTotal !== null
+        ? Math.min(openTotal, caps.open) + Math.min(closedTotal, caps.closed)
+        : null;
+    note("pulls", "Reading pull requests", openFetched + closedFetched, target);
+  };
+
+  async function walk(
+    states: string[],
+    order: { field: string; direction: string },
+    cap: number,
+    onPage: (count: number, total: number) => void,
+  ): Promise<{ pulls: PullRecord[]; truncated: boolean }> {
+    const collected: PullRecord[] = [];
+    let cursor: string | null = null;
+    let truncated = false;
+    for (;;) {
+      if (signal?.aborted) throw new GitHubError("Cancelled.", "aborted", 499);
+      const page: GqlPullsResponse = await graphql<GqlPullsResponse>(token, PULLS_QUERY, {
+        owner,
+        name: repo,
+        cursor,
+        states,
+        order,
+      });
+      const conn: GqlPullConnection = page.repository.pullRequests;
+      for (const node of conn.nodes) collected.push(normaliseGql(node));
+      onPage(collected.length, conn.totalCount);
+      report();
+      if (!conn.pageInfo.hasNextPage) break;
+      if (collected.length >= cap) {
+        truncated = true;
+        break;
+      }
+      cursor = conn.pageInfo.endCursor;
     }
-    cursor = conn.pageInfo.endCursor;
+    return { pulls: collected, truncated };
   }
 
-  // Closed and merged, most recently touched first.
-  cursor = null;
-  let closedFetched = 0;
-  let closedTotal: number | null = null;
-  let closedTruncated = false;
-  for (;;) {
-    if (signal?.aborted) throw new GitHubError("Cancelled.", "aborted", 499);
-    const page: GqlPullsResponse = await graphql<GqlPullsResponse>(token, PULLS_QUERY, {
-      owner,
-      name: repo,
-      cursor,
-      states: ["CLOSED", "MERGED"],
-      order: { field: "UPDATED_AT", direction: "DESC" },
-    });
-    const conn: GqlPullConnection = page.repository.pullRequests;
-    closedTotal = conn.totalCount;
-    for (const node of conn.nodes) pulls.push(normaliseGql(node));
-    closedFetched += conn.nodes.length;
-    note("closed", "Reading resolved pull requests", closedFetched, Math.min(closedTotal ?? 0, caps.closed));
-    if (!conn.pageInfo.hasNextPage) break;
-    if (closedFetched >= caps.closed) {
-      closedTruncated = true;
-      break;
-    }
-    cursor = conn.pageInfo.endCursor;
-  }
+  // The two walks are independent, so run them at once: on a big project this
+  // is the difference between finishing inside a serverless timeout and not.
+  const [openWalk, closedWalk] = await Promise.all([
+    // Oldest-first: if we hit the cap, the pull requests we skip are the newest,
+    // which keeps every "older than 30/90 days" count exact.
+    walk(["OPEN"], { field: "CREATED_AT", direction: "ASC" }, caps.open, (count, total) => {
+      openFetched = count;
+      openTotal = total;
+    }),
+    walk(["CLOSED", "MERGED"], { field: "UPDATED_AT", direction: "DESC" }, caps.closed, (count, total) => {
+      closedFetched = count;
+      closedTotal = total;
+    }),
+  ]);
+
+  const pulls = [...openWalk.pulls, ...closedWalk.pulls];
 
   return {
     meta,
@@ -519,10 +543,10 @@ async function collectViaGraphQL(
     sample: buildSample("graphql", pulls, {
       openFetched,
       openTotal,
-      openTruncated,
+      openTruncated: openWalk.truncated,
       closedFetched,
       closedTotal,
-      closedTruncated,
+      closedTruncated: closedWalk.truncated,
     }),
   };
 }
@@ -623,8 +647,16 @@ function buildSample(
   pulls: PullRecord[],
   counts: Omit<SampleInfo, "mode" | "botPullsExcluded" | "closedWindowStart">,
 ): SampleInfo {
+  // How far back the resolved sample actually reaches. The walk takes the most
+  // recently *updated* resolved pull requests, so everything touched since the
+  // oldest updatedAt in hand is present — and a merge touches its pull request.
+  // Neither createdAt nor closedAt works here: one ancient pull request closed
+  // or relabelled yesterday would claim a year of coverage we do not have.
   const closed = pulls.filter((p) => p.closedAt);
-  const oldest = closed.reduce<string | null>((acc, p) => (acc === null || p.createdAt < acc ? p.createdAt : acc), null);
+  const oldest = closed.reduce<string | null>(
+    (acc, p) => (acc === null || p.updatedAt < acc ? p.updatedAt : acc),
+    null,
+  );
   return {
     mode,
     ...counts,

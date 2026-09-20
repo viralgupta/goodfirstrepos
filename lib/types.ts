@@ -18,6 +18,7 @@ export interface PullRecord {
   isBot: boolean;
   association: Association;
   createdAt: string;
+  updatedAt: string;
   closedAt: string | null;
   mergedAt: string | null;
   isDraft: boolean;

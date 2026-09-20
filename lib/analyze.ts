@@ -104,6 +104,9 @@ export function analyse(
     sample.openTruncated && sample.openTotal ? Math.max(0, sample.openTotal - sample.openFetched) : 0;
   const outsideShareOfOpen = openAll.length ? openOutside.length / openAll.length : 1;
   const estimatedYoungOutside = Math.round(missingYoung * outsideShareOfOpen);
+  // Everything the page says about the open queue counts the estimated tail, so
+  // the rot share cannot disagree with the tile above it.
+  const openOutsideTotal = openOutside.length + estimatedYoungOutside;
 
   const buckets = [
     { label: "Under 7 days", test: (d: number) => d <= 7 },
@@ -253,16 +256,16 @@ export function analyse(
         : "Someone usually shows up reasonably fast.",
   });
 
-  const staleShare = openOutside.length ? over90 / openOutside.length : 0;
+  const staleShare = openOutsideTotal ? over90 / openOutsideTotal : 0;
   criteria.push({
     id: "backlog",
     label: "Backlog rot",
     question: "How much of the open outside queue has been abandoned in place?",
     max: 15,
-    available: attribution && openOutside.length >= 5,
+    available: attribution && openOutsideTotal >= 5,
     points: 15 * clamp(1 - (staleShare - 0.05) / 0.45),
-    detail: openOutside.length
-      ? `${over90} of ${openOutside.length} open outside pull requests (${pct(staleShare)}) are older than 90 days; ${over30} are past 30 days.`
+    detail: openOutsideTotal
+      ? `${over90} of ${openOutsideTotal.toLocaleString()} open outside pull requests (${pct(staleShare)}) are older than 90 days; ${over30} are past 30 days.`
       : "No open outside pull requests.",
     hint:
       staleShare > 0.3
@@ -270,7 +273,7 @@ export function analyse(
         : "The queue is kept reasonably current.",
   });
 
-  const throughput = openOutside.length ? merged90 / openOutside.length : merged90 > 0 ? 1 : 0;
+  const throughput = openOutsideTotal ? merged90 / openOutsideTotal : merged90 > 0 ? 1 : 0;
   criteria.push({
     id: "throughput",
     label: "Queue movement",
@@ -278,7 +281,7 @@ export function analyse(
     max: 10,
     available: sample.mode === "graphql",
     points: 10 * clamp(throughput / 0.5),
-    detail: `${merged90} outside pull requests merged in the last 90 days against ${openOutside.length} still open.`,
+    detail: `${merged90} outside pull requests merged in the last 90 days against ${openOutsideTotal.toLocaleString()} still open.`,
     hint:
       throughput < 0.1
         ? "New outside pull requests join the queue far faster than they leave it."
@@ -340,6 +343,11 @@ export function analyse(
     );
   }
   if (thinSample && attribution) flags.push("Very few resolved outside pull requests, so treat this score as a weak signal.");
+  if (trend.length < 2 && attribution && sample.closedTruncated) {
+    flags.push(
+      "This project resolves pull requests faster than the sample reaches back, so there is no honest month-by-month chart to draw. Deep scan reads further.",
+    );
+  }
   if (sample.botPullsExcluded > 0) {
     flags.push(`${sample.botPullsExcluded.toLocaleString()} bot pull requests were excluded from every figure.`);
   }
@@ -357,13 +365,13 @@ export function analyse(
         outsideAcceptance,
         medianFirstResponseHours,
         staleShare,
-        openOutside: openOutside.length,
+        openOutside: openOutsideTotal,
       }),
       criteria,
     },
     backlog: {
       open: openAll.length + missingYoung,
-      openOutside: openOutside.length + estimatedYoungOutside,
+      openOutside: openOutsideTotal,
       openInside: openAll.length - openOutside.length,
       openDraft: openOutside.filter((p) => p.isDraft).length,
       over30,
@@ -376,14 +384,14 @@ export function analyse(
       outside: {
         merged: outsideMerged.length,
         closed: outsideClosedUnmerged.length,
-        open: openOutside.length,
-        total: outside.length,
+        open: openOutsideTotal,
+        total: outsideMerged.length + outsideClosedUnmerged.length + openOutsideTotal,
       },
       inside: {
         merged: insideMerged.length,
         closed: insideResolved.length - insideMerged.length,
         open: inside.filter((p) => !p.closedAt).length,
-        total: inside.length,
+        total: insideResolved.length + inside.filter((p) => !p.closedAt).length,
       },
       mergedTotal,
       mergedOutside: outsideMerged.length,

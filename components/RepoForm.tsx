@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-const EXAMPLES = ["facebook/react", "sst/opencode", "vercel/next.js", "home-assistant/core", "astral-sh/ruff"];
+const EXAMPLES = ["facebook/react", "anomalyco/opencode", "vercel/next.js", "home-assistant/core", "astral-sh/ruff"];
 
 export function RepoForm({
   value,

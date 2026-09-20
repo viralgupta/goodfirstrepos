@@ -15,7 +15,7 @@ export function Footnotes({ analysis }: { analysis: Analysis }) {
         {analysis.score.available ? (
           <li className="flex gap-2">
             <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-ink-3" aria-hidden />
-            Merge statistics cover pull requests created since{" "}
+            Merge statistics cover pull requests resolved since{" "}
             {sample.closedWindowStart ? sample.closedWindowStart.slice(0, 10) : "the start of the sample"}.
           </li>
         ) : null}
